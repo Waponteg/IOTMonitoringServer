@@ -8,7 +8,7 @@ import schedule
 import time
 from django.conf import settings
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, settings.MQTT_USER_PUB)
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, settings.MQTT_USER_PUB)
 
 
 def analyze_data():
@@ -145,19 +145,19 @@ def analyze_events():
     print("{} eventos procesados".format(events))
 
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, connect_flags, reason_code, properties):
     '''
     Función que se ejecuta cuando se conecta al bróker.
     '''
-    print("Conectando al broker MQTT...", mqtt.connack_string(rc))
+    print("Conectando al broker MQTT...", str(reason_code))
 
 
-def on_disconnect(client: mqtt.Client, userdata, rc):
+def on_disconnect(client: mqtt.Client, userdata, disconnect_flags, reason_code, properties):
     '''
     Función que se ejecuta cuando se desconecta del broker.
     Intenta reconectar al bróker.
     '''
-    print("Desconectado con mensaje:" + str(mqtt.connack_string(rc)))
+    print("Desconectado con mensaje:" + str(reason_code))
     print("Reconectando...")
     client.reconnect()
 
@@ -170,7 +170,7 @@ def setup_mqtt():
     print("Iniciando cliente MQTT...", settings.MQTT_HOST, settings.MQTT_PORT)
     global client
     try:
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, settings.MQTT_USER_PUB)
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, settings.MQTT_USER_PUB)
         client.on_connect = on_connect
         client.on_disconnect = on_disconnect
 
