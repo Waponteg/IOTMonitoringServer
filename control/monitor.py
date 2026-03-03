@@ -59,6 +59,92 @@ def analyze_data():
     print(alerts, "alertas enviadas")
 
 
+# Umbral de desviación de temperatura (°C) entre el promedio de 1 hora vs 24 horas.
+# Si la temperatura reciente supera al promedio histórico por este valor, se activa el ventilador.
+DEVIATION_THRESHOLD = 2.0
+
+
+def analyze_events():
+    """
+    Nuevo procesamiento de evento basado en consulta a la base de datos.
+
+    Pre-requisito (consulta a BD): Se calcula el promedio de temperatura
+    de las últimas 24 horas por estación.
+
+    Condición: Si el promedio de temperatura de la última hora supera
+    al promedio de las últimas 24 horas por más de DEVIATION_THRESHOLD °C,
+    se detecta una tendencia de calentamiento anómalo.
+
+    Acción: Se envía un comando al dispositivo IoT para activar o desactivar
+    un actuador (ventilador emulado) vía MQTT.
+    """
+    print("Analizando eventos de temperatura...")
+
+    # ---- PRE-REQUISITO: Consulta a la base de datos ----
+    # Consulta 1: Promedio de temperatura de las últimas 24 horas por estación
+    data_24h = Data.objects.filter(
+        base_time__gte=datetime.now() - timedelta(hours=24),
+        measurement__name="temperatura"
+    ).values(
+        'station__user__username',
+        'station__location__city__name',
+        'station__location__state__name',
+        'station__location__country__name'
+    ).annotate(avg_temp_24h=Avg('avg_value'))
+
+    # Consulta 2: Promedio de temperatura de la última hora por estación
+    data_1h = Data.objects.filter(
+        base_time__gte=datetime.now() - timedelta(hours=1),
+        measurement__name="temperatura"
+    ).values(
+        'station__user__username',
+        'station__location__city__name',
+        'station__location__state__name',
+        'station__location__country__name'
+    ).annotate(avg_temp_1h=Avg('avg_value'))
+
+    # Indexar promedios de 24h por usuario para búsqueda eficiente
+    avg_24h_by_user = {}
+    for item in data_24h:
+        avg_24h_by_user[item['station__user__username']] = item['avg_temp_24h']
+
+    events = 0
+    for station_1h in data_1h:
+        user = station_1h['station__user__username']
+        avg_1h = station_1h['avg_temp_1h']
+
+        # Si no hay datos históricos de 24h para esta estación, se omite
+        if user not in avg_24h_by_user:
+            continue
+
+        avg_24h = avg_24h_by_user[user]
+
+        country = station_1h['station__location__country__name']
+        state = station_1h['station__location__state__name']
+        city = station_1h['station__location__city__name']
+        topic = '{}/{}/{}/{}/in'.format(country, state, city, user)
+
+        # ---- CONDICIÓN: Evaluar desviación ----
+        if avg_1h > avg_24h + DEVIATION_THRESHOLD:
+            # La temperatura reciente supera significativamente al promedio histórico
+            message = "EVENT FAN_ON {:.2f} {:.2f}".format(avg_1h, avg_24h)
+            print(datetime.now(),
+                  "Activando ventilador para {}: temp_1h={:.2f} > avg_24h={:.2f} + {}"
+                  .format(user, avg_1h, avg_24h, DEVIATION_THRESHOLD))
+            client.publish(topic, message)
+            events += 1
+        elif avg_1h <= avg_24h:
+            # La temperatura reciente es normal o menor al promedio histórico
+            message = "EVENT FAN_OFF {:.2f} {:.2f}".format(avg_1h, avg_24h)
+            print(datetime.now(),
+                  "Desactivando ventilador para {}: temp_1h={:.2f} <= avg_24h={:.2f}"
+                  .format(user, avg_1h, avg_24h))
+            client.publish(topic, message)
+            events += 1
+
+    print("{} eventos procesados".format(events))
+
+
 def on_connect(client, userdata, flags, rc):
     '''
     Función que se ejecuta cuando se conecta al bróker.
@@ -102,11 +188,13 @@ def setup_mqtt():
 
 def start_cron():
     '''
-    Inicia el cron que se encarga de ejecutar la función analyze_data cada 5 minutos.
+    Inicia el cron que se encarga de ejecutar la función analyze_data cada 5 minutos
+    y la función analyze_events cada 5 minutos para el procesamiento de eventos.
     '''
     print("Iniciando cron...")
     schedule.every(5).minutes.do(analyze_data)
-    print("Servicio de control iniciado")
+    schedule.every(5).minutes.do(analyze_events)
+    print("Servicio de control iniciado (alertas + eventos)")
     while 1:
         schedule.run_pending()
         time.sleep(1)

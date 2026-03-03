@@ -27,7 +27,7 @@ import paho.mqtt.client as mqtt
 '''
 Dirección IP y puerto del servidor MQTT
 '''
-MQTT_HOST = "44.199.254.24"  # "ip.maquina.mqtt"
+MQTT_HOST = "44.204.108.242"  # "ip.maquina.mqtt"
 MQTT_PORT = 8082
 
 '''
@@ -64,14 +64,58 @@ que el emulador genera y la variación de la humedad
 MOISTURE_VALUE = 60.0
 MOISTURE_VARIATION = 5.0
 
+'''
+Estado del actuador emulado (ventilador).
+True = encendido, False = apagado.
+'''
+fan_state = False
+
+
+def activate_fan(avg_1h, avg_24h):
+    '''
+    Emula la activación de un actuador (ventilador).
+    En un dispositivo real, aquí se activaría un pin GPIO
+    para encender el ventilador o un LED indicador.
+    '''
+    global fan_state
+    fan_state = True
+    print("")
+    print("############################################################")
+    print("#          ACTUADOR: VENTILADOR ENCENDIDO                   #")
+    print("#          Temperatura reciente: {:<26}#".format("{:.2f}°C".format(avg_1h)))
+    print("#          Promedio 24h:         {:<26}#".format("{:.2f}°C".format(avg_24h)))
+    print("#          Motivo: Calentamiento anómalo detectado          #")
+    print("############################################################")
+    print("")
+
+
+def deactivate_fan(avg_1h, avg_24h):
+    '''
+    Emula la desactivación del actuador (ventilador).
+    En un dispositivo real, aquí se desactivaría el pin GPIO.
+    '''
+    global fan_state
+    fan_state = False
+    print("")
+    print("############################################################")
+    print("#          ACTUADOR: VENTILADOR APAGADO                     #")
+    print("#          Temperatura reciente: {:<26}#".format("{:.2f}°C".format(avg_1h)))
+    print("#          Promedio 24h:         {:<26}#".format("{:.2f}°C".format(avg_24h)))
+    print("#          Motivo: Temperatura normal                       #")
+    print("############################################################")
+    print("")
+
 
 def process_message(msg: str):
     '''
-    Procesar mensaje recibido
+    Procesar mensaje recibido.
+    Maneja dos tipos de mensajes:
+      - ALERT: Alerta de valores fuera de rango (existente)
+      - EVENT: Comando de actuador basado en análisis de eventos (nuevo)
     '''
     print("Procesando mensaje: " + msg)
 
-    if ("ALERT" in msg):
+    if msg.startswith("ALERT"):
         print("############################################################")
         print("############################################################")
         print("############################################################")
@@ -79,6 +123,23 @@ def process_message(msg: str):
         print("############################################################")
         print("############################################################")
         print("############################################################")
+
+    elif msg.startswith("EVENT"):
+        parts = msg.split()
+        # Formato: EVENT FAN_ON|FAN_OFF avg_1h avg_24h
+        if len(parts) >= 4:
+            action = parts[1]
+            avg_1h = float(parts[2])
+            avg_24h = float(parts[3])
+
+            if action == "FAN_ON":
+                activate_fan(avg_1h, avg_24h)
+            elif action == "FAN_OFF":
+                deactivate_fan(avg_1h, avg_24h)
+            else:
+                print("Acción de evento desconocida: " + action)
+        else:
+            print("Formato de evento inválido: " + msg)
 
 
 def mqtt_publish(topic, msg):
@@ -112,11 +173,11 @@ def measure_moisture():
     return random.uniform(min_value, max_value)
 
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, connect_flags, reason_code, properties):
     '''
     Función de conexión MQTT
     '''
-    print("Connected with result: " + mqtt.connack_string(rc))
+    print("Connected with result: " + str(reason_code))
     client.subscribe(MQTT_SUB_TOPIC)
 
 
@@ -129,11 +190,11 @@ def on_message(client, userdata, msg):
     process_message(data)
 
 
-def on_disconnect(client, userdata, rc):
+def on_disconnect(client, userdata, disconnect_flags, reason_code, properties):
     '''
     Función de desconexión MQTT
     '''
-    print("Disconnected with result: " + mqtt.connack_string(rc))
+    print("Disconnected with result: " + str(reason_code))
 
 
 def mqtt_setup():
@@ -141,7 +202,7 @@ def mqtt_setup():
     Función de conexión MQTT
     '''
     global client
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, MQTT_USER)
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, MQTT_USER)
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
     client.connect(MQTT_HOST, MQTT_PORT, 60)
     client.on_connect = on_connect
@@ -152,13 +213,15 @@ def mqtt_setup():
 
 def measure_data():
     '''
-    Función de medición y envío de datos
+    Función de medición y envío de datos.
+    Muestra además el estado actual del actuador (ventilador emulado).
     '''
     print("Midiendo...")
     temperature = measure_temperature()
     moisture = measure_moisture()
-    print("\tTemperatura: {}°C".format(temperature))
-    print("\tHumedad: {}%".format(moisture))
+    print("\tTemperatura: {:.2f}°C".format(temperature))
+    print("\tHumedad: {:.2f}%".format(moisture))
+    print("\tVentilador: {}".format("ENCENDIDO" if fan_state else "APAGADO"))
     mqtt_publish(MQTT_PUB_TOPIC, json.dumps({
         "temperatura": temperature,
         "humedad": moisture
