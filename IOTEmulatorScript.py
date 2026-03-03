@@ -54,7 +54,7 @@ MEASURE_INTERVAL = 2
 Valor medio de la temperatura en grados Celsius
 que el emulador genera y la variación de la temperatura
 '''
-TEMPERATURE_VALUE = 21.0
+TEMPERATURE_VALUE = 28.0  # Valor elevado para disparar evento FAN_ON (original: 21.0)
 TEMPERATURE_VARIATION = 3.0
 
 '''
