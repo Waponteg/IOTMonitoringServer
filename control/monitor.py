@@ -1,7 +1,8 @@
 from argparse import ArgumentError
 import ssl
 from django.db.models import Avg
-from datetime import timedelta, datetime
+from datetime import timedelta
+from django.utils import timezone
 from receiver.models import Data, Measurement
 import paho.mqtt.client as mqtt
 import schedule
@@ -19,7 +20,7 @@ def analyze_data():
     print("Calculando alertas...")
 
     data = Data.objects.filter(
-        base_time__gte=datetime.now() - timedelta(hours=1))
+        base_time__gte=timezone.now() - timedelta(hours=1))
     aggregation = data.annotate(check_value=Avg('avg_value')) \
         .select_related('station', 'measurement') \
         .select_related('station__user', 'station__location') \
@@ -51,7 +52,7 @@ def analyze_data():
         if alert:
             message = "ALERT {} {} {}".format(variable, min_value, max_value)
             topic = '{}/{}/{}/{}/in'.format(country, state, city, user)
-            print(datetime.now(), "Sending alert to {} {}".format(topic, variable))
+            print(timezone.now(), "Sending alert to {} {}".format(topic, variable))
             client.publish(topic, message)
             alerts += 1
 
@@ -83,7 +84,7 @@ def analyze_events():
     # ---- PRE-REQUISITO: Consulta a la base de datos ----
     # Consulta 1: Promedio de temperatura de las últimas 24 horas por estación
     data_24h = Data.objects.filter(
-        base_time__gte=datetime.now() - timedelta(hours=24),
+        base_time__gte=timezone.now() - timedelta(hours=24),
         measurement__name="temperatura"
     ).values(
         'station__user__username',
@@ -94,7 +95,7 @@ def analyze_events():
 
     # Consulta 2: Promedio de temperatura de la última hora por estación
     data_1h = Data.objects.filter(
-        base_time__gte=datetime.now() - timedelta(hours=1),
+        base_time__gte=timezone.now() - timedelta(hours=1),
         measurement__name="temperatura"
     ).values(
         'station__user__username',
@@ -128,7 +129,7 @@ def analyze_events():
         if avg_1h > avg_24h + DEVIATION_THRESHOLD:
             # La temperatura reciente supera significativamente al promedio histórico
             message = "EVENT FAN_ON {:.2f} {:.2f}".format(avg_1h, avg_24h)
-            print(datetime.now(),
+            print(timezone.now(),
                   "Activando ventilador para {}: temp_1h={:.2f} > avg_24h={:.2f} + {}"
                   .format(user, avg_1h, avg_24h, DEVIATION_THRESHOLD))
             client.publish(topic, message)
@@ -136,7 +137,7 @@ def analyze_events():
         elif avg_1h <= avg_24h:
             # La temperatura reciente es normal o menor al promedio histórico
             message = "EVENT FAN_OFF {:.2f} {:.2f}".format(avg_1h, avg_24h)
-            print(datetime.now(),
+            print(timezone.now(),
                   "Desactivando ventilador para {}: temp_1h={:.2f} <= avg_24h={:.2f}"
                   .format(user, avg_1h, avg_24h))
             client.publish(topic, message)
